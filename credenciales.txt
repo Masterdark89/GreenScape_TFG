@@ -1,0 +1,3 @@
+cliente@gmail.com
+trabajador@gmail.com
+password
