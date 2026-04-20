@@ -4,12 +4,19 @@ publish_to: 'none'
 version: 0.1.0+1
 
 environment:
-  sdk: ^3.11.0
+  sdk: ^3.9.0
 
 dependencies:
   flutter:
     sdk: flutter
+  firebase_core: ^4.1.0
+  cloud_firestore: ^6.0.0
+  flutter_localizations:
+    sdk: flutter
+  flutter_local_notifications: ^17.2.3
+  file_picker: ^8.1.7
   google_fonts: ^6.1.0
+  shared_preferences: ^2.3.3
 
 dev_dependencies:
   flutter_test:
@@ -19,3 +26,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/

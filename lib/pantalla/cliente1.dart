@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../data/route_catalog.dart';
 import 'ruta.dart';
 import 'chatCliente.dart';
 import 'pago.dart';
@@ -84,30 +85,75 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-class GreenScapeContent extends StatelessWidget {
+enum _SortField { difficulty, duration, elevation }
+
+enum _SortDirection { none, desc, asc }
+
+class GreenScapeContent extends StatefulWidget {
   const GreenScapeContent({super.key});
 
-  // Route data
-  final List<Map<String, dynamic>> routes = const [
-    {
-      'name': 'Refugio del Reloj',
-      'distance': '8.76 km',
-      'duration': '5.52 h',
-      'elevation': '479 m',
-    },
-    {
-      'name': 'Reloj y Simancón',
-      'distance': '12.56 km',
-      'duration': '7.0 h',
-      'elevation': '762 m',
-    },
-    {
-      'name': 'Charca Verde',
-      'distance': '11.9 km',
-      'duration': '7.0 h',
-      'elevation': '669 m',
-    },
-  ];
+  @override
+  State<GreenScapeContent> createState() => _GreenScapeContentState();
+}
+
+class _GreenScapeContentState extends State<GreenScapeContent> {
+  final List<Map<String, dynamic>> _routes =
+      kExploreRoutes.map((route) => Map<String, dynamic>.from(route)).toList();
+
+  String _searchQuery = '';
+  _SortField? _activeSortField;
+  _SortDirection _sortDirection = _SortDirection.none;
+
+  List<Map<String, dynamic>> get _visibleRoutes {
+    final String query = _normalizeForSearch(_searchQuery.trim());
+
+    final List<Map<String, dynamic>> filtered = _routes.where((route) {
+      if (query.isEmpty) {
+        return true;
+      }
+
+      final String routeName = _normalizeForSearch(route['name'] as String);
+      final String difficulty = _normalizeForSearch(route['difficulty'] as String);
+      return routeName.contains(query) || difficulty.contains(query);
+    }).toList();
+
+    if (_activeSortField == null || _sortDirection == _SortDirection.none) {
+      return filtered;
+    }
+
+    int comparator(Map<String, dynamic> a, Map<String, dynamic> b) {
+      switch (_activeSortField!) {
+        case _SortField.difficulty:
+          return _difficultyRank(a['difficulty']).compareTo(
+            _difficultyRank(b['difficulty']),
+          );
+        case _SortField.duration:
+          return _extractNumber(a['duration']).compareTo(
+            _extractNumber(b['duration']),
+          );
+        case _SortField.elevation:
+          return _extractNumber(a['elevation']).compareTo(
+            _extractNumber(b['elevation']),
+          );
+      }
+    }
+
+    filtered.sort(comparator);
+    if (_sortDirection == _SortDirection.desc) {
+      return filtered.reversed.toList();
+    }
+    return filtered;
+  }
+
+  String _normalizeForSearch(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -139,6 +185,11 @@ class GreenScapeContent extends StatelessWidget {
 
           // Search bar
           TextField(
+            onChanged: (value) {
+              setState(() {
+                _searchQuery = value;
+              });
+            },
             decoration: InputDecoration(
               hintText: 'Busca tu ruta...',
               prefixIcon: const Icon(Icons.search),
@@ -158,22 +209,30 @@ class GreenScapeContent extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _buildFilterChip('Dificultad'),
+                _buildFilterChip(
+                  label: 'Dificultad',
+                  field: _SortField.difficulty,
+                ),
                 const SizedBox(width: 12),
-                _buildFilterChip('Duración'),
+                _buildFilterChip(
+                  label: 'Duración',
+                  field: _SortField.duration,
+                ),
                 const SizedBox(width: 12),
-                _buildFilterChip('Elevación'),
+                _buildFilterChip(
+                  label: 'Elevación',
+                  field: _SortField.elevation,
+                ),
               ],
             ),
           ),
           const SizedBox(height: 24),
 
           // Route cards
-          ...routes.asMap().entries.map(
+          ..._visibleRoutes.map(
                 (entry) => _buildRouteCard(
                   context,
-                  entry.value,
-                  isFirstRoute: entry.key == 0,
+                  entry,
                 ),
               ),
           const SizedBox(height: 20),
@@ -182,23 +241,100 @@ class GreenScapeContent extends StatelessWidget {
     );
   }
 
-  Widget _buildFilterChip(String label) {
-    return Chip(
-      label: Text(label),
-      backgroundColor: Colors.grey.shade200,
-      shape: RoundedRectangleBorder(
+  Widget _buildFilterChip({
+    required String label,
+    required _SortField field,
+  }) {
+    final bool isActive = _activeSortField == field;
+    final bool showArrow = isActive && _sortDirection != _SortDirection.none;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(20),
-        side: BorderSide.none,
+        onTap: () => _toggleSort(field),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: isActive ? Colors.green.shade100 : Colors.grey.shade200,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: isActive ? Colors.green.shade800 : Colors.black87,
+                ),
+              ),
+              if (showArrow) ...[
+                const SizedBox(width: 6),
+                Icon(
+                  _sortDirection == _SortDirection.desc
+                      ? Icons.arrow_downward
+                      : Icons.arrow_upward,
+                  size: 16,
+                  color: Colors.green.shade800,
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
-      labelStyle: const TextStyle(fontWeight: FontWeight.w500),
     );
+  }
+
+  void _toggleSort(_SortField field) {
+    setState(() {
+      if (_activeSortField != field) {
+        _activeSortField = field;
+        _sortDirection = _SortDirection.asc;
+        return;
+      }
+
+      if (_sortDirection == _SortDirection.asc) {
+        _sortDirection = _SortDirection.desc;
+        return;
+      }
+
+      if (_sortDirection == _SortDirection.desc) {
+        _sortDirection = _SortDirection.none;
+        _activeSortField = null;
+        return;
+      }
+
+      _sortDirection = _SortDirection.asc;
+    });
+  }
+
+  int _difficultyRank(String difficulty) {
+    final String value = difficulty.toLowerCase();
+
+    if (value.contains('dificil') || value.contains('difícil')) {
+      return 3;
+    }
+    if (value.contains('medio') || value.contains('moderad')) {
+      return 2;
+    }
+    return 1;
+  }
+
+  double _extractNumber(String text) {
+    final RegExpMatch? match = RegExp(r'\d+(?:\.\d+)?').firstMatch(text);
+    if (match == null) {
+      return 0;
+    }
+    return double.tryParse(match.group(0) ?? '') ?? 0;
   }
 
   Widget _buildRouteCard(
     BuildContext context,
-    Map<String, dynamic> route, {
-    bool isFirstRoute = false,
-  }) {
+    Map<String, dynamic> route,
+  ) {
+    final Color difficultyColor = _difficultyColor(route['difficulty']);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 20),
       elevation: 2,
@@ -210,11 +346,89 @@ class GreenScapeContent extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              route['name'],
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+            SizedBox(
+              width: double.infinity,
+              height: 190,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.asset(
+                      route['imagePath'],
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(
+                        color: Colors.grey.shade200,
+                        child: Center(
+                          child: Icon(
+                            Icons.image_outlined,
+                            size: 42,
+                            color: Colors.grey.shade500,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black.withValues(alpha: 0.05),
+                            Colors.black.withValues(alpha: 0.20),
+                            Colors.black.withValues(alpha: 0.65),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 14,
+                      left: 14,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: difficultyColor.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.35),
+                          ),
+                        ),
+                        child: Text(
+                          route['difficulty'],
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 14,
+                      right: 14,
+                      bottom: 14,
+                      child: Text(
+                        route['name'],
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          height: 1.05,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black54,
+                              blurRadius: 8,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -233,20 +447,11 @@ class GreenScapeContent extends StatelessWidget {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: () {
-                  if (isFirstRoute) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const RouteDetailScreen(),
-                      ),
-                    );
-                    return;
-                  }
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Ver ruta: ${route['name']}'),
-                      duration: const Duration(milliseconds: 800),
+                  final RouteDetailData detail = buildRouteDetailFromRoute(route);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => RouteDetailScreen(detail: detail),
                     ),
                   );
                 },
@@ -265,6 +470,20 @@ class GreenScapeContent extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Color _difficultyColor(String difficulty) {
+    final String value = difficulty.toLowerCase();
+
+    if (value.contains('dificil') || value.contains('difícil')) {
+      return Colors.red.shade700;
+    }
+
+    if (value.contains('medio') || value.contains('moderad')) {
+      return Colors.orange.shade700;
+    }
+
+    return Colors.green.shade700;
   }
 
   Widget _buildStatColumn(String label, String value) {

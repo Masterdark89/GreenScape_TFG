@@ -1,5 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../data/user_database.dart';
+import '../data/current_user_session.dart';
+import '../data/reservation_repository.dart';
+import '../data/user_preferences_store.dart';
 import 'trabajador1.dart';
 import 'inventario.dart';
 import 'chatTrabajador.dart';
@@ -13,7 +20,259 @@ class WorkerProfileScreen extends StatefulWidget {
 }
 
 class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
+  static const int _profileEditCooldownDays = 15;
+
   int _selectedIndex = 3;
+  bool _isAvatarHovered = false;
+  bool _isLoadingProfile = true;
+  Uint8List? _profileImageBytes;
+  String _profileName = 'Usuario Trabajador';
+  String _profileEmail = 'trabajador@gmail.com';
+  String _profilePhone = '+34 645 987 321';
+  String _profileCity = 'Sevilla';
+
+  String? get _currentUserEmail => CurrentUserSession.instance.currentUserEmail;
+
+  int _remainingCooldownDays(DateTime lastUpdate) {
+    final cooldown = Duration(days: _profileEditCooldownDays);
+    final elapsed = DateTime.now().difference(lastUpdate);
+    final remaining = cooldown - elapsed;
+    if (remaining <= Duration.zero) {
+      return 0;
+    }
+    return (remaining.inHours / 24).ceil();
+  }
+
+  String _fieldLabel(String field) {
+    switch (field) {
+      case 'name':
+        return 'nombre';
+      case 'phone':
+        return 'teléfono';
+      case 'city':
+        return 'ciudad';
+      default:
+        return field;
+    }
+  }
+
+  Future<void> _openEditProfileDialog() async {
+    final currentEmail = _currentUserEmail;
+    if (currentEmail == null || currentEmail.isEmpty) {
+      return;
+    }
+
+    final nameController = TextEditingController(text: _profileName);
+    final phoneController = TextEditingController(text: _profilePhone);
+    final cityController = TextEditingController(text: _profileCity);
+
+    final Map<String, String>? submitted = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Editar perfil'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(labelText: 'Nombre'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: phoneController,
+                  decoration: const InputDecoration(labelText: 'Teléfono'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: cityController,
+                  decoration: const InputDecoration(labelText: 'Ciudad'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop({
+                  'name': nameController.text.trim(),
+                  'phone': phoneController.text.trim(),
+                  'city': cityController.text.trim(),
+                });
+              },
+              child: const Text('Guardar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    nameController.dispose();
+    phoneController.dispose();
+    cityController.dispose();
+
+    if (submitted == null) {
+      return;
+    }
+
+    final updates = <String, String>{};
+    if ((submitted['name'] ?? '').isNotEmpty && submitted['name'] != _profileName) {
+      updates['name'] = submitted['name']!;
+    }
+    if ((submitted['phone'] ?? '') != _profilePhone) {
+      updates['phone'] = submitted['phone']!;
+    }
+    if ((submitted['city'] ?? '') != _profileCity) {
+      updates['city'] = submitted['city']!;
+    }
+
+    if (updates.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay cambios para guardar.')),
+      );
+      return;
+    }
+
+    final blockedFields = <String, int>{};
+    for (final field in updates.keys) {
+      final lastUpdated = await UserPreferencesStore.instance.getProfileFieldLastUpdatedAt(
+        userEmail: currentEmail,
+        field: field,
+      );
+      if (lastUpdated == null) {
+        continue;
+      }
+      final remainingDays = _remainingCooldownDays(lastUpdated);
+      if (remainingDays > 0) {
+        blockedFields[field] = remainingDays;
+      }
+    }
+
+    if (blockedFields.isNotEmpty) {
+      final details = blockedFields.entries
+          .map((entry) => '${_fieldLabel(entry.key)} (${entry.value} días)')
+          .join(', ');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Aún no puedes editar: $details.'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await UserDatabase.instance.updateUserProfile(
+        email: currentEmail,
+        name: updates['name'],
+        phone: updates['phone'],
+        city: updates['city'],
+      );
+
+      final changedAt = DateTime.now();
+      for (final field in updates.keys) {
+        await UserPreferencesStore.instance.saveProfileFieldLastUpdatedAt(
+          userEmail: currentEmail,
+          field: field,
+          changedAt: changedAt,
+        );
+      }
+
+      await _loadProfileData();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Perfil actualizado correctamente.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo guardar el perfil: $e'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfileData();
+  }
+
+  Future<void> _loadProfileData() async {
+    final String? currentEmail = CurrentUserSession.instance.currentUserEmail;
+    if (currentEmail == null || currentEmail.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingProfile = false;
+      });
+      return;
+    }
+
+    final Map<String, Object?>? userData =
+        await UserDatabase.instance.getUserByEmail(currentEmail);
+
+    if (!mounted) return;
+    setState(() {
+      _profileEmail = currentEmail;
+      _profileName = (userData?['name'] as String?)?.trim().isNotEmpty == true
+          ? (userData!['name'] as String)
+          : 'Usuario Trabajador';
+      _profilePhone = (userData?['phone'] as String?)?.trim().isNotEmpty == true
+          ? (userData!['phone'] as String)
+          : '+34 645 987 321';
+      _profileCity = (userData?['city'] as String?)?.trim().isNotEmpty == true
+          ? (userData!['city'] as String)
+          : 'Sevilla';
+      _isLoadingProfile = false;
+    });
+
+    final profileImage = await UserPreferencesStore.instance.getProfileImageBytes(
+      userEmail: currentEmail,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _profileImageBytes = profileImage != null ? Uint8List.fromList(profileImage) : null;
+    });
+  }
+
+  Future<void> _pickProfileImage() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+
+    if (result == null || result.files.isEmpty) {
+      return;
+    }
+
+    final bytes = result.files.single.bytes;
+    if (bytes == null) {
+      return;
+    }
+
+    final currentEmail = _currentUserEmail;
+    if (currentEmail != null && currentEmail.isNotEmpty) {
+      await UserPreferencesStore.instance.saveProfileImageBytes(
+        userEmail: currentEmail,
+        bytes: bytes,
+      );
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _profileImageBytes = bytes;
+    });
+  }
 
   void _onNavItemTapped(int index) {
     if (index == _selectedIndex) {
@@ -85,22 +344,83 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
               Center(
                 child: Column(
                   children: [
-                    Container(
-                      width: 100,
-                      height: 100,
-                      decoration: BoxDecoration(
-                        color: Colors.green.shade100,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.person,
-                        size: 60,
-                        color: Colors.green.shade700,
+                    MouseRegion(
+                      onEnter: (_) {
+                        setState(() {
+                          _isAvatarHovered = true;
+                        });
+                      },
+                      onExit: (_) {
+                        setState(() {
+                          _isAvatarHovered = false;
+                        });
+                      },
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: _pickProfileImage,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Container(
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade100,
+                                shape: BoxShape.circle,
+                                image: _profileImageBytes != null
+                                    ? DecorationImage(
+                                        image: MemoryImage(_profileImageBytes!),
+                                        fit: BoxFit.cover,
+                                      )
+                                    : null,
+                              ),
+                              child: _profileImageBytes == null
+                                  ? Icon(
+                                      Icons.person,
+                                      size: 60,
+                                      color: Colors.green.shade700,
+                                    )
+                                  : null,
+                            ),
+                            AnimatedOpacity(
+                              duration: const Duration(milliseconds: 180),
+                              opacity: _isAvatarHovered ? 1 : 0,
+                              child: Container(
+                                width: 100,
+                                height: 100,
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.45),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.upload,
+                                      color: Colors.white,
+                                      size: 28,
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Subir imagen',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Usuario Trabajador',
+                      _profileName,
                       style: GoogleFonts.manrope(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -109,7 +429,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'trabajador@gmail.com',
+                      _profileEmail,
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.grey.shade600,
@@ -129,8 +449,22 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                   color: Colors.grey.shade800,
                 ),
               ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  onPressed: _isLoadingProfile ? null : _openEditProfileDialog,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Editar perfil'),
+                ),
+              ),
               const SizedBox(height: 12),
-              _buildPersonalInfoContainer(),
+              _isLoadingProfile
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  : _buildPersonalInfoContainer(),
               const SizedBox(height: 24),
 
               // Estadísticas de trabajo
@@ -184,28 +518,11 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
               // Botones de acción
               SizedBox(
                 width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Editar perfil (próximamente)')),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade700,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text('Editar Perfil'),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
                 child: OutlinedButton(
-                  onPressed: () {
+                  onPressed: () async {
+                    await CurrentUserSession.instance.clear();
+                    await ReservationRepository.instance.clearLoadedReservations();
+                    if (!mounted) return;
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -234,7 +551,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
         unselectedItemColor: Colors.grey,
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.warehouse),
+            icon: Icon(Icons.inventory_2_outlined),
             label: 'Inventario',
           ),
           BottomNavigationBarItem(
@@ -264,13 +581,13 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
       ),
       child: Column(
         children: [
-          _buildInfoRow('Nombre', 'Félix Rodríguez de la fuente'),
+          _buildInfoRow('Nombre', _profileName),
           Divider(color: Colors.grey.shade200, height: 20),
-          _buildInfoRow('Teléfono', '+34 645 987 321'),
+          _buildInfoRow('Teléfono', _profilePhone),
           Divider(color: Colors.grey.shade200, height: 20),
           _buildInfoRow('Puesto', 'Guía de Montaña'),
           Divider(color: Colors.grey.shade200, height: 20),
-          _buildInfoRow('Experiencia', '8 años'),
+          _buildInfoRow('Ciudad', _profileCity),
         ],
       ),
     );
