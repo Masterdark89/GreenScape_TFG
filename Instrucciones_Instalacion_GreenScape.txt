@@ -1,0 +1,23 @@
+INSTRUCCIONES DE INSTALACION - GreenScape
+
+Archivo APK: GreenScape.apk
+Ubicacion en el Escritorio: C:\Users\Jaime\OneDrive\Escritorio\EntregaDia4\GreenScape.apk
+
+1. Copia el archivo GreenScape.apk al movil Android.
+2. En el movil, abre Ajustes > Seguridad o Ajustes > Aplicaciones.
+3. Activa la opcion para permitir instalacion de apps de origen desconocido para la app con la que abras el APK (Archivos, Descargas o el gestor de archivos que uses).
+4. Abre la carpeta Descargas o Archivos en el movil.
+5. Toca sobre GreenScape.apk.
+6. Pulsa Instalar.
+7. Si aparece un aviso de Play Protect o del navegador, acepta la instalacion igualmente.
+8. Cuando termine, pulsa Abrir para iniciar la app.
+
+Notas importantes:
+- La app necesita conexion a internet para las funciones que usan Firebase.
+- Si te pide iniciar sesion, prueba estas cuentas de demostracion:
+  - Trabajador: trabajador@gmail.com / password
+  - Cliente: cliente@gmail.com / password
+- Si el movil bloquea la instalacion, revisa que la opcion de origen desconocido este permitida para la app de archivos.
+- Si la instalacion falla por una version anterior, desinstala la app e instala de nuevo.
+
+Si la app abre pero no inicia sesion, comprueba que haya internet y que la cuenta que uses exista en el sistema.
